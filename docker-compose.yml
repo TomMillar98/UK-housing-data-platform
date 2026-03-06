@@ -1,30 +1,61 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:15
     container_name: uk_housing_postgres
     restart: always
     environment:
-      POSTGRES_USER: housing_user
-      POSTGRES_PASSWORD: housing_password
-      POSTGRES_DB: housing_db
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d  # runs 01_schema.sql + 02_views.sql on initialisation
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Conditionally load master data
+  data_init:
+    image: python:3.11-slim
+    depends_on:
+      postgres:
+        condition: service_healthy
+    working_dir: /app
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      LOAD_MODE: ${LOAD_MODE:-UPSERT}
+    volumes:
+      - ./:/app
+    entrypoint: >
+      bash -lc "
+      apt-get update &&
+      apt-get install -y --no-install-recommends postgresql-client &&
+      chmod +x scripts/boot.sh &&
+      scripts/boot.sh
+      "
+    restart: "no"
 
   pgadmin:
     image: dpage/pgadmin4
     container_name: uk_housing_pgadmin
     restart: always
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@admin.com
-      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
     ports:
-      - "5050:80"
+      - "${PGADMIN_PORT:-5050}:80"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres_data:
